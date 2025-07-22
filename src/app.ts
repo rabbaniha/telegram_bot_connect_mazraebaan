@@ -35,8 +35,5 @@ app.get("/", (req, res) => {
   res.send("Telegram Service API is running.");
 });
 
-// Initialize service
-telegramService.initialize().catch(console.error);
-
 // Export app for Vercel
 export default app;
