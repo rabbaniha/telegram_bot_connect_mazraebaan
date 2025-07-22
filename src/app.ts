@@ -10,7 +10,6 @@ import telegramService from "./services/telegram_service";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3002;
 
 // --- Middlewares ---
 app.use(express.json());
@@ -19,11 +18,9 @@ app.use(helmet());
 app.use(morgan("combined"));
 
 // --- API Routes ---
-// Routes for communication with the main server
 app.use("/api", telegramRouter);
 
 // --- Telegram Webhook ---
-// The endpoint that Telegram will send updates to
 app.post("/api/telegram-webhook", async (req, res) => {
   try {
     await telegramService.handleUpdate(req.body);
@@ -34,8 +31,12 @@ app.post("/api/telegram-webhook", async (req, res) => {
   }
 });
 
-app.listen(PORT, async () => {
-  console.log(`App run on port ${PORT}`);
-  // Initialize Telegram Service on startup
-  await telegramService.initialize();
+app.get("/", (req, res) => {
+  res.send("Telegram Service API is running.");
 });
+
+// Initialize service
+telegramService.initialize().catch(console.error);
+
+// Export app for Vercel
+export default app;
