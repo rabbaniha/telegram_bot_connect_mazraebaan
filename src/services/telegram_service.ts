@@ -21,14 +21,13 @@ interface Chat {
 }
 
 interface Message {
-    content: {
-        type: 'text' | 'image' | 'file';
-        text?: string;
-        fileUrl?: string;
-    };
-    timestamp: Date;
+  content: {
+    type: "text" | "image" | "file";
+    text?: string;
+    fileUrl?: string;
+  };
+  timestamp: Date;
 }
-
 
 class TelegramService {
   private apiClient: AxiosInstance | null = null;
@@ -49,7 +48,7 @@ class TelegramService {
     this.apiClient = null;
   }
 
-  async initialize() {
+  async initialize(webhookUrl: string) {
     if (this.isInitializing) {
       console.log("Initialization already in progress...");
       return false;
@@ -61,13 +60,14 @@ class TelegramService {
 
       this.botToken = process.env.TELEGRAM_BOT_TOKEN || null;
       this.groupId = process.env.TELEGRAM_CHAT_ID || null;
-      this.webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || null;
-
+      this.webhookUrl = webhookUrl || null;
       if (!this.botToken || !this.groupId || !this.webhookUrl) {
-        console.error("Telegram environment variables (TOKEN, CHAT_ID, WEBHOOK_URL) are not set.");
+        console.error(
+          "Telegram environment variables (TOKEN, CHAT_ID, WEBHOOK_URL) are not set."
+        );
         return false;
       }
-      
+
       this.baseUrl = `https://api.telegram.org/bot${this.botToken}`;
       this.apiClient = axios.create({ timeout: 60000 });
 
@@ -85,14 +85,19 @@ class TelegramService {
         drop_pending_updates: true,
       });
       if (!webhookResponse.ok) {
-        throw new Error("Failed to set webhook: " + JSON.stringify(webhookResponse));
+        throw new Error(
+          "Failed to set webhook: " + JSON.stringify(webhookResponse)
+        );
       }
 
       console.log("Webhook set successfully!");
       this.isConnected = true;
       return true;
     } catch (error: any) {
-      console.error("Failed to initialize Telegram bot:", error.message || error);
+      console.error(
+        "Failed to initialize Telegram bot:",
+        error.message || error
+      );
       this.isConnected = false;
       return false;
     } finally {
@@ -130,7 +135,9 @@ class TelegramService {
   private async handleMessage(message: any) {
     const isReply = !!message.reply_to_message;
     const isCommand = message.text && message.text.startsWith("/");
-    const chatId = isReply ? this.extractChatIdFromMessage(message.reply_to_message.text || "") : null;
+    const chatId = isReply
+      ? this.extractChatIdFromMessage(message.reply_to_message.text || "")
+      : null;
 
     if (message.chat.id.toString() !== this.groupId) return;
     if (!chatId && isReply) return; // Ignore replies to messages without a Chat ID
@@ -138,7 +145,7 @@ class TelegramService {
     try {
       // Priority: 1. Command, 2. Reply, 3. Other messages (ignore)
       if (isCommand) {
-          await this.handleCommand(message);
+        await this.handleCommand(message);
       } else if (isReply && chatId) {
         await this.handleReplyMessage(message, chatId);
       }
@@ -146,47 +153,53 @@ class TelegramService {
       console.error("Error handling message:", error);
     }
   }
-  
+
   private async handleReplyMessage(message: any, chatId: string) {
     try {
-        const adminInfo = {
-            name: message.from.first_name + (message.from.last_name ? ` ${message.from.last_name}` : ""),
-            telegramId: message.from.id.toString(),
-        };
+      const adminInfo = {
+        name:
+          message.from.first_name +
+          (message.from.last_name ? ` ${message.from.last_name}` : ""),
+        telegramId: message.from.id.toString(),
+      };
 
-        let content: any = {};
-        if (message.text) {
-            content = { type: "text", text: message.text };
-        } else {
-            // This part is simplified. You might need to download the file and re-upload to your main server
-            // or pass the Telegram file URL to your main server.
-            const fileId = message.photo?.[message.photo.length - 1].file_id || message.document?.file_id;
-            const fileUrl = fileId ? await this.getFileUrl(fileId) : null;
-            content = {
-                type: message.photo ? "image" : "file",
-                text: message.caption || "",
-                fileName: message.document?.file_name || `image_${Date.now()}.jpg`,
-                fileUrl: fileUrl, // URL to the file on Telegram's servers
-            };
-        }
-        
-        // Forward the admin's reply to the main server
-        await mainApiService.forwardUpdateToMainServer({
-            event: "admin_message",
-            data: {
-                chatId: chatId,
-                message: {
-                    sender: "admin",
-                    senderInfo: adminInfo,
-                    content: content,
-                    timestamp: new Date(),
-                }
-            },
-        });
-        
+      let content: any = {};
+      if (message.text) {
+        content = { type: "text", text: message.text };
+      } else {
+        // This part is simplified. You might need to download the file and re-upload to your main server
+        // or pass the Telegram file URL to your main server.
+        const fileId =
+          message.photo?.[message.photo.length - 1].file_id ||
+          message.document?.file_id;
+        const fileUrl = fileId ? await this.getFileUrl(fileId) : null;
+        content = {
+          type: message.photo ? "image" : "file",
+          text: message.caption || "",
+          fileName: message.document?.file_name || `image_${Date.now()}.jpg`,
+          fileUrl: fileUrl, // URL to the file on Telegram's servers
+        };
+      }
+
+      // Forward the admin's reply to the main server
+      await mainApiService.forwardUpdateToMainServer({
+        event: "admin_message",
+        data: {
+          chatId: chatId,
+          message: {
+            sender: "admin",
+            senderInfo: adminInfo,
+            content: content,
+            timestamp: new Date(),
+          },
+        },
+      });
     } catch (error) {
-        console.error("Error handling reply message:", error);
-        await this.sendMessage(this.groupId!, `❌ خطا در ارسال پیام به سرور اصلی برای چت ${chatId}`);
+      console.error("Error handling reply message:", error);
+      await this.sendMessage(
+        this.groupId!,
+        `❌ خطا در ارسال پیام به سرور اصلی برای چت ${chatId}`
+      );
     }
   }
 
@@ -194,7 +207,10 @@ class TelegramService {
     const command = message.text.split(" ")[0].toLowerCase();
     switch (command) {
       case "/start":
-        await this.sendMessage(message.chat.id, "سرویس مستقل ربات چت آنلاین فعال است!");
+        await this.sendMessage(
+          message.chat.id,
+          "سرویس مستقل ربات چت آنلاین فعال است!"
+        );
         break;
       // Other commands like /stats or /close should now probably be handled
       // by making an API call to your main server to get the data or perform the action.
@@ -209,10 +225,14 @@ class TelegramService {
       if (!chatId) return;
 
       const adminInfo = {
-        name: callbackQuery.from.first_name + (callbackQuery.from.last_name ? ` ${callbackQuery.from.last_name}`: ""),
+        name:
+          callbackQuery.from.first_name +
+          (callbackQuery.from.last_name
+            ? ` ${callbackQuery.from.last_name}`
+            : ""),
         telegramId: callbackQuery.from.id.toString(),
       };
-      
+
       const actionType = action.split("_")[0];
 
       if (actionType === "quickmsg") {
@@ -229,16 +249,19 @@ class TelegramService {
                 senderInfo: adminInfo,
                 content: { type: "text", text: replyText },
                 timestamp: new Date(),
-              }
-            }
+              },
+            },
           });
-          await this.answerCallbackQuery(callbackQuery.id, "پیام آماده ارسال شد.");
+          await this.answerCallbackQuery(
+            callbackQuery.id,
+            "پیام آماده ارسال شد."
+          );
         } else {
           await this.answerCallbackQuery(callbackQuery.id, "پیام یافت نشد.");
         }
         return;
       }
-      
+
       // For actions like close, assign, etc., we notify the main server.
       let eventType = "";
       switch (actionType) {
@@ -248,21 +271,23 @@ class TelegramService {
           break;
         case "assign":
           eventType = "chat_assign";
-          await this.answerCallbackQuery(callbackQuery.id, "چت به شما اختصاص یافت.");
+          await this.answerCallbackQuery(
+            callbackQuery.id,
+            "چت به شما اختصاص یافت."
+          );
           break;
         default:
           return; // Unknown action
       }
-      
+
       await mainApiService.forwardUpdateToMainServer({
         event: eventType,
         data: {
           chatId: chatId,
           admin: adminInfo,
           timestamp: new Date(),
-        }
+        },
       });
-
     } catch (error) {
       console.error("Error handling callback query:", error);
     }
@@ -275,7 +300,7 @@ class TelegramService {
 
     try {
       const messageText = this.formatMessageForTelegram(chat, message);
-      
+
       // Simplified inline keyboard
       const inlineKeyboard = {
         inline_keyboard: [
@@ -285,16 +310,30 @@ class TelegramService {
           ],
         ],
       };
-      
+
       let sentMessage;
       if (message.content.type === "text") {
-        sentMessage = await this.sendMessage(this.groupId, messageText, inlineKeyboard);
+        sentMessage = await this.sendMessage(
+          this.groupId,
+          messageText,
+          inlineKeyboard
+        );
       } else if (message.content.type === "image" && message.content.fileUrl) {
-        sentMessage = await this.sendPhoto(this.groupId, message.content.fileUrl, messageText, inlineKeyboard);
+        sentMessage = await this.sendPhoto(
+          this.groupId,
+          message.content.fileUrl,
+          messageText,
+          inlineKeyboard
+        );
       } else if (message.content.type === "file" && message.content.fileUrl) {
-        sentMessage = await this.sendDocument(this.groupId, message.content.fileUrl, messageText, inlineKeyboard);
+        sentMessage = await this.sendDocument(
+          this.groupId,
+          message.content.fileUrl,
+          messageText,
+          inlineKeyboard
+        );
       }
-      
+
       return sentMessage ? sentMessage.result.message_id : null;
     } catch (error) {
       console.error("Error sending message to Telegram:", error);
@@ -303,19 +342,23 @@ class TelegramService {
   }
 
   // --- Telegram API Wrappers ---
-  
+
   private async makeApiCall(method: string, params: any = {}) {
-    if (!this.apiClient || !this.botToken) throw new Error("API client not initialized");
+    if (!this.apiClient || !this.botToken)
+      throw new Error("API client not initialized");
     try {
       const url = `${this.baseUrl}/${method}`;
       const response = await this.apiClient.post(url, params);
       return response.data;
     } catch (error: any) {
-      console.error(`Telegram API call failed for ${method}:`, error.response?.data || error.message);
+      console.error(
+        `Telegram API call failed for ${method}:`,
+        error.response?.data || error.message
+      );
       throw error;
     }
   }
-  
+
   private async sendMessage(chatId: string, text: string, replyMarkup?: any) {
     return this.makeApiCall("sendMessage", {
       chat_id: chatId,
@@ -325,7 +368,12 @@ class TelegramService {
     });
   }
 
-  private async sendPhoto(chatId: string, photo: string, caption?: string, replyMarkup?: any) {
+  private async sendPhoto(
+    chatId: string,
+    photo: string,
+    caption?: string,
+    replyMarkup?: any
+  ) {
     return this.makeApiCall("sendPhoto", {
       chat_id: chatId,
       photo: photo,
@@ -334,7 +382,12 @@ class TelegramService {
     });
   }
 
-  private async sendDocument(chatId: string, document: string, caption?: string, replyMarkup?: any) {
+  private async sendDocument(
+    chatId: string,
+    document: string,
+    caption?: string,
+    replyMarkup?: any
+  ) {
     return this.makeApiCall("sendDocument", {
       chat_id: chatId,
       document: document,
@@ -342,7 +395,7 @@ class TelegramService {
       ...(replyMarkup && { reply_markup: JSON.stringify(replyMarkup) }),
     });
   }
-  
+
   private async answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.makeApiCall("answerCallbackQuery", {
       callback_query_id: callbackQueryId,
@@ -351,21 +404,23 @@ class TelegramService {
   }
 
   // --- Utility Methods ---
-  
+
   private formatMessageForTelegram(chat: Chat, message: Message): string {
-    const userInfo = chat.user.name + (chat.user.phoneNumber ? ` (${chat.user.phoneNumber})` : "");
+    const userInfo =
+      chat.user.name +
+      (chat.user.phoneNumber ? ` (${chat.user.phoneNumber})` : "");
     const timestamp = new Date(message.timestamp).toLocaleString("fa-IR");
 
     let text = `💬 <b>پیام جدید از ${userInfo}</b>\n`;
     text += `<code>🆔 Chat ID: ${chat.chatId}</code>\n`;
     text += `⏰ ${timestamp}\n`;
     if (chat.user.currentPage) {
-        text += `📍 صفحه: ${chat.user.currentPage}\n`;
+      text += `📍 صفحه: ${chat.user.currentPage}\n`;
     }
     if (chat.tags && chat.tags.length > 0) {
       text += `🏷️ تگ‌ها: ${chat.tags.join(", ")}\n`;
     }
-    text += `\n📝 <b>پیام:</b>\n${message.content.text || '(فایل)'}`;
+    text += `\n📝 <b>پیام:</b>\n${message.content.text || "(فایل)"}`;
     return text;
   }
 
@@ -373,11 +428,13 @@ class TelegramService {
     const match = text.match(/🆔 Chat ID: ([a-zA-Z0-9-_]+)/);
     return match ? match[1] : null;
   }
-  
+
   private async getFileUrl(fileId: string): Promise<string | null> {
     try {
       const response = await this.makeApiCall("getFile", { file_id: fileId });
-      return response.ok ? `https://api.telegram.org/file/bot${this.botToken}/${response.result.file_path}` : null;
+      return response.ok
+        ? `https://api.telegram.org/file/bot${this.botToken}/${response.result.file_path}`
+        : null;
     } catch (error) {
       console.error("Error getting file URL:", error);
       return null;
