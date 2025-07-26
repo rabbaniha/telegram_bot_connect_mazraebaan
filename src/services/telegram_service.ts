@@ -191,6 +191,7 @@ class TelegramService {
             senderInfo: adminInfo,
             content: content,
             timestamp: new Date(),
+            telegramMessageId: message.message_id,
           },
         },
       });
@@ -249,6 +250,7 @@ class TelegramService {
                 senderInfo: adminInfo,
                 content: { type: "text", text: replyText },
                 timestamp: new Date(),
+                telegramMessageId: callbackQuery.message_id,
               },
             },
           });
