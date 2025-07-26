@@ -92,6 +92,10 @@ class TelegramService {
 
       console.log("Webhook set successfully!");
       this.isConnected = true;
+
+      // --- NEW: Notify admin on successful connection ---
+      await this.sendMessage(this.groupId, `✅ **سرویس ربات تلگرام با موفقیت متصل و فعال شد.**\n${new Date().toLocaleString('fa-IR')}`);
+
       return true;
     } catch (error: any) {
       console.error(
@@ -106,8 +110,11 @@ class TelegramService {
   }
 
   async disconnect() {
-    if (this.isConnected && this.apiClient) {
+    if (this.isConnected && this.apiClient && this.groupId) {
       try {
+        // --- NEW: Notify admin on disconnect ---
+        await this.sendMessage(this.groupId, `🔌 **سرویس ربات تلگرام در حال قطع اتصال...**`);
+
         console.log("Removing webhook...");
         await this.makeApiCall("deleteWebhook", { drop_pending_updates: true });
       } catch (error) {
@@ -140,10 +147,9 @@ class TelegramService {
       : null;
 
     if (message.chat.id.toString() !== this.groupId) return;
-    if (!chatId && isReply) return; // Ignore replies to messages without a Chat ID
+    if (!chatId && isReply) return;
 
     try {
-      // Priority: 1. Command, 2. Reply, 3. Other messages (ignore)
       if (isCommand) {
         await this.handleCommand(message);
       } else if (isReply && chatId) {
@@ -167,8 +173,6 @@ class TelegramService {
       if (message.text) {
         content = { type: "text", text: message.text };
       } else {
-        // This part is simplified. You might need to download the file and re-upload to your main server
-        // or pass the Telegram file URL to your main server.
         const fileId =
           message.photo?.[message.photo.length - 1].file_id ||
           message.document?.file_id;
@@ -177,11 +181,10 @@ class TelegramService {
           type: message.photo ? "image" : "file",
           text: message.caption || "",
           fileName: message.document?.file_name || `image_${Date.now()}.jpg`,
-          fileUrl: fileUrl, // URL to the file on Telegram's servers
+          fileUrl: fileUrl,
         };
       }
 
-      // Forward the admin's reply to the main server
       await mainApiService.forwardUpdateToMainServer({
         event: "admin_message",
         data: {
@@ -191,7 +194,8 @@ class TelegramService {
             senderInfo: adminInfo,
             content: content,
             timestamp: new Date(),
-            telegramMessageId: message.message_id,
+            // Kept from previous improvement
+            telegramMessageId: message.message_id, 
           },
         },
       });
@@ -208,21 +212,22 @@ class TelegramService {
     const command = message.text.split(" ")[0].toLowerCase();
     switch (command) {
       case "/start":
+      case "/status":
         await this.sendMessage(
           message.chat.id,
-          "سرویس مستقل ربات چت آنلاین فعال است!"
+          this.isConnected ? "✅ سرویس ربات تلگرام فعال و متصل است." : "❌ سرویس ربات تلگرام قطع است."
         );
         break;
-      // Other commands like /stats or /close should now probably be handled
-      // by making an API call to your main server to get the data or perform the action.
-      // For simplicity, they are omitted here.
     }
   }
 
   private async handleCallbackQuery(callbackQuery: any) {
     try {
       const action = callbackQuery.data;
-      const chatId = action?.split("_")[1];
+      const parts = action.split("_");
+      const actionType = parts[0];
+      const chatId = parts[1];
+
       if (!chatId) return;
 
       const adminInfo = {
@@ -234,13 +239,10 @@ class TelegramService {
         telegramId: callbackQuery.from.id.toString(),
       };
 
-      const actionType = action.split("_")[0];
-
       if (actionType === "quickmsg") {
-        const index = parseInt(action.split("_")[2], 10);
+        const index = parseInt(parts[2], 10);
         const replyText = this.quickReplies[index];
         if (replyText) {
-          // Send quick reply to main server
           await mainApiService.forwardUpdateToMainServer({
             event: "admin_message",
             data: {
@@ -250,7 +252,6 @@ class TelegramService {
                 senderInfo: adminInfo,
                 content: { type: "text", text: replyText },
                 timestamp: new Date(),
-                telegramMessageId: callbackQuery.message_id,
               },
             },
           });
@@ -263,24 +264,29 @@ class TelegramService {
         }
         return;
       }
-
-      // For actions like close, assign, etc., we notify the main server.
+      
       let eventType = "";
+      let answerText = "";
+
       switch (actionType) {
         case "close":
           eventType = "chat_close";
-          await this.answerCallbackQuery(callbackQuery.id, "چت بسته شد.");
+          answerText = "چت بسته شد.";
           break;
         case "assign":
           eventType = "chat_assign";
-          await this.answerCallbackQuery(
-            callbackQuery.id,
-            "چت به شما اختصاص یافت."
-          );
+          answerText = "چت به شما اختصاص یافت.";
+          break;
+        // --- NEW: Handle "Replying..." button click ---
+        case "replying":
+          eventType = "admin_typing";
+          answerText = "وضعیت 'در حال پاسخ' به کاربر ارسال شد.";
           break;
         default:
           return; // Unknown action
       }
+
+      await this.answerCallbackQuery(callbackQuery.id, answerText);
 
       await mainApiService.forwardUpdateToMainServer({
         event: eventType,
@@ -303,11 +309,12 @@ class TelegramService {
     try {
       const messageText = this.formatMessageForTelegram(chat, message);
 
-      // Simplified inline keyboard
+      // --- NEW: Updated inline keyboard with "Replying" button ---
       const inlineKeyboard = {
         inline_keyboard: [
           [
             { text: "👤 تخصیص به من", callback_data: `assign_${chat.chatId}` },
+            { text: "📝 در حال پاسخ", callback_data: `replying_${chat.chatId}` },
             { text: "🔴 بستن چت", callback_data: `close_${chat.chatId}` },
           ],
         ],
@@ -343,7 +350,7 @@ class TelegramService {
     }
   }
 
-  // --- Telegram API Wrappers ---
+  // --- Telegram API Wrappers (unchanged) ---
 
   private async makeApiCall(method: string, params: any = {}) {
     if (!this.apiClient || !this.botToken)
@@ -369,6 +376,8 @@ class TelegramService {
       ...(replyMarkup && { reply_markup: JSON.stringify(replyMarkup) }),
     });
   }
+  
+  // sendPhoto, sendDocument, answerCallbackQuery methods remain the same...
 
   private async sendPhoto(
     chatId: string,
@@ -379,6 +388,7 @@ class TelegramService {
     return this.makeApiCall("sendPhoto", {
       chat_id: chatId,
       photo: photo,
+      parse_mode: "HTML",
       ...(caption && { caption }),
       ...(replyMarkup && { reply_markup: JSON.stringify(replyMarkup) }),
     });
@@ -393,6 +403,7 @@ class TelegramService {
     return this.makeApiCall("sendDocument", {
       chat_id: chatId,
       document: document,
+      parse_mode: "HTML",
       ...(caption && { caption }),
       ...(replyMarkup && { reply_markup: JSON.stringify(replyMarkup) }),
     });
@@ -404,8 +415,8 @@ class TelegramService {
       ...(text && { text }),
     });
   }
-
-  // --- Utility Methods ---
+  
+  // --- Utility Methods (unchanged) ---
 
   private formatMessageForTelegram(chat: Chat, message: Message): string {
     const userInfo =
