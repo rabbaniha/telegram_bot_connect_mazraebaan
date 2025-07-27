@@ -90,8 +90,10 @@ class TelegramService {
         );
       }
 
+
       console.log("Webhook set successfully!");
       this.isConnected = true;
+
 
       // --- NEW: Notify admin on successful connection ---
       await this.sendMessage(this.groupId, `✅ **سرویس ربات تلگرام با موفقیت متصل و فعال شد.**\n${new Date().toLocaleString('fa-IR')}`);
