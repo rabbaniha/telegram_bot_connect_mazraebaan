@@ -14,44 +14,11 @@ const apiKeyAuth = (req: Request, res: Response, next: Function) => {
   }
 };
 
-// Initailize telegram and set webhook after running
-router.get("/initialize", async (req: Request, res: Response) => {
-  const porotocol = "https";
-  const host = req.get("host");
-  const webhookUrl = `${porotocol}://${host}/api/telegram/webhook`;
-
-  if (telegramService.getIsConnected()) {
-    res
-      .status(200)
-      .json({ success: true, message: "Already connected to Telegram" });
-    return;
-  }
-
-  const isInitializing = await telegramService.initialize(webhookUrl);
-  if (isInitializing) {
-    console.log("Telegram Service Initialized");
-    res.json({
-      success: true,
-      message: `Telegram Service Initialized in ${webhookUrl}`,
-    });
-    return;
-  } else {
-    res.status(500).json({
-      success: false,
-      message: "Failed to initialize Telegram Service",
-    });
-    return;
-  }
+router.post("/webhook", async (req: Request, res: Response) => {
+    await telegramService.handleUpdate(req.body);
+    res.status(200).send("OK"); // Always send a 200 OK to Telegram quickly
 });
 
-// Route to get the connection status of the Telegram bot
-// Your main server can periodically call this to check the service health.
-router.get("/status", (req: Request, res: Response) => {
-  res.json({ isConnected: telegramService.getIsConnected() });
-});
-
-// Route for the main server to send a message to be forwarded to Telegram
-// This is the primary endpoint for your main server to use.
 router.post(
   "/message-to-telegram",
   apiKeyAuth,
