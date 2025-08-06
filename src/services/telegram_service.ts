@@ -30,13 +30,6 @@ interface Message {
 }
 
 class TelegramService {
-  private apiClient: AxiosInstance | null = null;
-  private groupId: string | null = null;
-  private isConnected: boolean = false;
-  private botToken: string | null = null;
-  private baseUrl: string = "";
-  private isInitializing: boolean = false;
-  private webhookUrl: string | null = null;
   private quickReplies: string[] = [
     "سلام! چطور می‌تونم کمکتون کنم؟",
     "لطفاً کمی صبر کنید، در حال بررسی موضوع هستم.",
@@ -44,87 +37,19 @@ class TelegramService {
     "برای اطلاعات بیشتر با شماره پشتیبانی تماس بگیرید.",
   ];
 
-  constructor() {
-    this.apiClient = null;
-  }
-
-  async initialize(webhookUrl: string) {
-    if (this.isInitializing) {
-      console.log("Initialization already in progress...");
-      return false;
-    }
-    this.isInitializing = true;
-
-    try {
-      await this.disconnect();
-
-      this.botToken = process.env.TELEGRAM_BOT_TOKEN || null;
-      this.groupId = process.env.TELEGRAM_CHAT_ID || null;
-      this.webhookUrl = webhookUrl || null;
-      if (!this.botToken || !this.groupId || !this.webhookUrl) {
-        console.error(
-          "Telegram environment variables (TOKEN, CHAT_ID, WEBHOOK_URL) are not set."
-        );
-        return false;
-      }
-
-      this.baseUrl = `https://api.telegram.org/bot${this.botToken}`;
-      this.apiClient = axios.create({ timeout: 60000 });
-
-      console.log("Testing bot connection...");
-      const botInfo = await this.makeApiCall("getMe");
-      if (!botInfo.ok) {
-        throw new Error("Bot token is invalid: " + JSON.stringify(botInfo));
-      }
-      console.log(`Bot connected successfully! @${botInfo.result.username}`);
-
-      console.log("Setting up webhook...");
-      const webhookResponse = await this.makeApiCall("setWebhook", {
-        url: this.webhookUrl,
-        allowed_updates: ["message", "callback_query"],
-        drop_pending_updates: true,
-      });
-      if (!webhookResponse.ok) {
-        throw new Error(
-          "Failed to set webhook: " + JSON.stringify(webhookResponse)
-        );
-      }
-
-
-      console.log("Webhook set successfully!");
-      this.isConnected = true;
-
-
-      // --- NEW: Notify admin on successful connection ---
-      await this.sendMessage(this.groupId, `✅ **سرویس ربات تلگرام با موفقیت متصل و فعال شد.**\n${new Date().toLocaleString('fa-IR')}`);
-
-      return true;
-    } catch (error: any) {
-      console.error(
-        "Failed to initialize Telegram bot:",
-        error.message || error
+  private getEnv() {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const groupId = process.env.TELEGRAM_CHAT_ID;
+    if (!botToken || !groupId) {
+      throw new Error(
+        "Telegram environment variables (TOKEN, CHAT_ID) are not set."
       );
-      this.isConnected = false;
-      return false;
-    } finally {
-      this.isInitializing = false;
     }
-  }
-
-  async disconnect() {
-    if (this.isConnected && this.apiClient && this.groupId) {
-      try {
-        // --- NEW: Notify admin on disconnect ---
-        await this.sendMessage(this.groupId, `🔌 **سرویس ربات تلگرام در حال قطع اتصال...**`);
-
-        console.log("Removing webhook...");
-        await this.makeApiCall("deleteWebhook", { drop_pending_updates: true });
-      } catch (error) {
-        console.error("Error removing webhook:", error);
-      }
-    }
-    this.isConnected = false;
-    this.apiClient = null;
+    return {
+      botToken,
+      groupId,
+      baseUrl: `https://api.telegram.org/bot${botToken}`,
+    };
   }
 
   async handleUpdate(update: TelegramUpdate) {
@@ -142,13 +67,14 @@ class TelegramService {
   // --- Message Handlers ---
 
   private async handleMessage(message: any) {
+    const groupId = this.getEnv().groupId;
     const isReply = !!message.reply_to_message;
     const isCommand = message.text && message.text.startsWith("/");
     const chatId = isReply
       ? this.extractChatIdFromMessage(message.reply_to_message.text || "")
       : null;
 
-    if (message.chat.id.toString() !== this.groupId) return;
+    if (message.chat.id.toString() !== groupId) return;
     if (!chatId && isReply) return;
 
     try {
@@ -163,6 +89,7 @@ class TelegramService {
   }
 
   private async handleReplyMessage(message: any, chatId: string) {
+    const groupId = this.getEnv().groupId;
     try {
       const adminInfo = {
         name:
@@ -197,14 +124,14 @@ class TelegramService {
             content: content,
             timestamp: new Date(),
             // Kept from previous improvement
-            telegramMessageId: message.message_id, 
+            telegramMessageId: message.message_id,
           },
         },
       });
     } catch (error) {
       console.error("Error handling reply message:", error);
       await this.sendMessage(
-        this.groupId!,
+        groupId!,
         `❌ خطا در ارسال پیام به سرور اصلی برای چت ${chatId}`
       );
     }
@@ -217,7 +144,7 @@ class TelegramService {
       case "/status":
         await this.sendMessage(
           message.chat.id,
-          this.isConnected ? "✅ سرویس ربات تلگرام فعال و متصل است." : "❌ سرویس ربات تلگرام قطع است."
+          "✅ سرویس ربات تلگرام فعال و متصل است."
         );
         break;
     }
@@ -266,7 +193,7 @@ class TelegramService {
         }
         return;
       }
-      
+
       let eventType = "";
       let answerText = "";
 
@@ -306,7 +233,8 @@ class TelegramService {
   // --- Public Methods (called via API) ---
 
   async sendMessageToTelegram(chat: Chat, message: Message) {
-    if (!this.isConnected || !this.groupId) return null;
+    const groupId = this.getEnv().groupId;
+    if (!groupId) return null;
 
     try {
       const messageText = this.formatMessageForTelegram(chat, message);
@@ -316,7 +244,10 @@ class TelegramService {
         inline_keyboard: [
           [
             { text: "👤 تخصیص به من", callback_data: `assign_${chat.chatId}` },
-            { text: "📝 در حال پاسخ", callback_data: `replying_${chat.chatId}` },
+            {
+              text: "📝 در حال پاسخ",
+              callback_data: `replying_${chat.chatId}`,
+            },
             { text: "🔴 بستن چت", callback_data: `close_${chat.chatId}` },
           ],
         ],
@@ -325,20 +256,20 @@ class TelegramService {
       let sentMessage;
       if (message.content.type === "text") {
         sentMessage = await this.sendMessage(
-          this.groupId,
+          groupId,
           messageText,
           inlineKeyboard
         );
       } else if (message.content.type === "image" && message.content.fileUrl) {
         sentMessage = await this.sendPhoto(
-          this.groupId,
+          groupId,
           message.content.fileUrl,
           messageText,
           inlineKeyboard
         );
       } else if (message.content.type === "file" && message.content.fileUrl) {
         sentMessage = await this.sendDocument(
-          this.groupId,
+          groupId,
           message.content.fileUrl,
           messageText,
           inlineKeyboard
@@ -355,11 +286,10 @@ class TelegramService {
   // --- Telegram API Wrappers (unchanged) ---
 
   private async makeApiCall(method: string, params: any = {}) {
-    if (!this.apiClient || !this.botToken)
-      throw new Error("API client not initialized");
+    const { baseUrl } = this.getEnv();
     try {
-      const url = `${this.baseUrl}/${method}`;
-      const response = await this.apiClient.post(url, params);
+      const url = `${baseUrl}/${method}`;
+      const response = await axios.post(url, params);
       return response.data;
     } catch (error: any) {
       console.error(
@@ -378,7 +308,7 @@ class TelegramService {
       ...(replyMarkup && { reply_markup: JSON.stringify(replyMarkup) }),
     });
   }
-  
+
   // sendPhoto, sendDocument, answerCallbackQuery methods remain the same...
 
   private async sendPhoto(
@@ -417,7 +347,7 @@ class TelegramService {
       ...(text && { text }),
     });
   }
-  
+
   // --- Utility Methods (unchanged) ---
 
   private formatMessageForTelegram(chat: Chat, message: Message): string {
@@ -445,19 +375,16 @@ class TelegramService {
   }
 
   private async getFileUrl(fileId: string): Promise<string | null> {
+    const botToken = this.getEnv().botToken;
     try {
       const response = await this.makeApiCall("getFile", { file_id: fileId });
       return response.ok
-        ? `https://api.telegram.org/file/bot${this.botToken}/${response.result.file_path}`
+        ? `https://api.telegram.org/file/bot${botToken}/${response.result.file_path}`
         : null;
     } catch (error) {
       console.error("Error getting file URL:", error);
       return null;
     }
-  }
-
-  public getIsConnected(): boolean {
-    return this.isConnected;
   }
 }
 
